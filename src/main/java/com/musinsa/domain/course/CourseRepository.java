@@ -11,6 +11,9 @@ import java.util.Optional;
 
 public interface CourseRepository extends JpaRepository<Course, Long> {
 
+    @Query("SELECT c FROM Course c JOIN FETCH c.department JOIN FETCH c.professor")
+    List<Course> findAllWithDetails();
+
     @Query("SELECT c FROM Course c JOIN FETCH c.department JOIN FETCH c.professor WHERE c.department.name = :departmentName")
     List<Course> findByDepartmentName(@Param("departmentName") String departmentName);
 
