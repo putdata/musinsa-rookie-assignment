@@ -74,6 +74,9 @@ public class EnrollmentService {
         }
 
         // 7. 정원 초과 검증 + enrolled 증가
+        if (course.getEnrolled() >= course.getCapacity()) {
+            throw new BusinessException(ErrorCode.CAPACITY_EXCEEDED);
+        }
         course.enroll();
 
         // 8. Enrollment 저장
