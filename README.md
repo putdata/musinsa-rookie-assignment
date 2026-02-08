@@ -75,9 +75,23 @@ src/main/java/com/musinsa/
 | [docs/api/endpoints.md](docs/api/endpoints.md) | REST API 상세 명세 |
 | [docs/decisions/](docs/decisions/) | Architecture Decision Records |
 
+## AI 활용 이력 (prompts/)
+
+AI와의 협업 과정을 기록한 프롬프트 이력입니다.
+
+| 파일 | 내용 |
+|------|------|
+| [1-초기설정.md](prompts/1-초기설정.md) | 프로젝트 초기 구조 세팅 |
+| [2-ERD구성 및 구현 범위.md](prompts/2-ERD구성%20및%20구현%20범위.md) | ERD 설계, 구현 순서 결정 |
+| [3-수강 동시 취소 멱등성.md](prompts/3-수강%20동시%20취소%20멱등성.md) | 동시 취소 버그 진단 및 멱등성 설계 |
+| [4-로깅 및 타임아웃.md](prompts/4-로깅%20및%20타임아웃.md) | 로깅, 락/트랜잭션 타임아웃 설계 (미구현, 설계까지 완료) |
+
+`prompts/plans/`에는 각 단계별 브레인스토밍에서 도출된 설계 문서가 포함되어 있습니다.
+
 ## 의사결정 기록
 
 | ADR | 제목 | 상태 |
 |-----|------|------|
 | [001](docs/decisions/001-project-structure.md) | 프로젝트 구조 및 아키텍처 | Accepted |
 | [002](docs/decisions/002-tech-stack.md) | 기술 스택 선택 | Accepted |
+| [003](docs/decisions/003-enrollment-cancel-idempotency.md) | 수강취소 동시성 및 DELETE 멱등성 | Accepted |
