@@ -1,5 +1,6 @@
 package com.musinsa.domain.student;
 
+import com.musinsa.domain.department.Department;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -25,8 +26,9 @@ public class Student {
     @Column(nullable = false, unique = true)
     private String studentNumber;
 
-    @Column(nullable = false)
-    private String departmentName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id", nullable = false)
+    private Department department;
 
     @Column(nullable = false)
     private Integer grade;

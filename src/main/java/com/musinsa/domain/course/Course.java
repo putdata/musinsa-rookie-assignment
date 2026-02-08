@@ -1,5 +1,7 @@
 package com.musinsa.domain.course;
 
+import com.musinsa.domain.department.Department;
+import com.musinsa.domain.professor.Professor;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -28,15 +30,32 @@ public class Course {
     @Column(nullable = false)
     private Integer capacity;
 
+    @Builder.Default
     @Column(nullable = false)
-    private Integer enrolled;
+    private Integer enrolled = 0;
 
     @Column(nullable = false)
     private String schedule;
 
-    @Column(nullable = false)
-    private String departmentName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id", nullable = false)
+    private Department department;
 
-    @Column(nullable = false)
-    private String professorName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "professor_id", nullable = false)
+    private Professor professor;
+
+    public void enroll() {
+        if (this.enrolled >= this.capacity) {
+            throw new IllegalStateException("강좌 정원이 초과되었습니다.");
+        }
+        this.enrolled++;
+    }
+
+    public void cancel() {
+        if (this.enrolled <= 0) {
+            throw new IllegalStateException("수강 인원이 0명입니다.");
+        }
+        this.enrolled--;
+    }
 }

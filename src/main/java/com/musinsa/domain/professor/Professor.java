@@ -1,5 +1,6 @@
 package com.musinsa.domain.professor;
 
+import com.musinsa.domain.department.Department;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
@@ -22,6 +23,7 @@ public class Professor {
     @Column(nullable = false)
     private String name;
 
-    @Column(nullable = false)
-    private String departmentName;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "department_id", nullable = false)
+    private Department department;
 }
