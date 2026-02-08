@@ -79,11 +79,13 @@ Service + Controller에 조회 로직 구현.
 7. Enrollment 저장 + Course.enroll()
 8. 트랜잭션 커밋 -> 락 해제
 
-**수강취소 (DELETE /api/enrollments/{id}):**
-1. Enrollment 존재 확인
-2. Course 비관적 락 획득
-3. Course.cancel() + Enrollment 삭제
-4. 트랜잭션 커밋 -> 락 해제
+**수강취소 (DELETE /api/enrollments/{id}):** *(ADR-003에 의해 멱등 처리로 변경)*
+1. Enrollment 비관적 락 조회 (findByIdWithLock, JOIN FETCH course)
+2. 결과가 empty → 바로 리턴 (멱등: 이미 취소됨)
+3. Course 비관적 락 획득 (락 순서: Enrollment → Course)
+4. Course.cancel() + Enrollment 삭제
+5. 트랜잭션 커밋 → 락 해제
+6. 응답: 204 No Content (본문 없음)
 
 **커밋**: `feat(enrollment): 수강신청/취소 API 및 동시성 제어 구현`
 

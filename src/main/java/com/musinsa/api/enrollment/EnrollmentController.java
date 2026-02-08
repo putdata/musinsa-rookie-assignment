@@ -9,7 +9,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/enrollments")
@@ -33,8 +32,8 @@ public class EnrollmentController {
     }
 
     @DeleteMapping("/{id}")
-    public Map<String, String> cancel(@PathVariable Long id) {
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void cancel(@PathVariable Long id) {
         enrollmentService.cancel(id);
-        return Map.of("message", "수강이 취소되었습니다.");
     }
 }

@@ -91,11 +91,14 @@ public class EnrollmentService {
 
     @Transactional
     public void cancel(Long enrollmentId) {
-        // 1. Enrollment 존재 확인
-        Enrollment enrollment = enrollmentRepository.findById(enrollmentId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
+        // 1. Enrollment 비관적 락 조회 (없으면 이미 취소된 것 → 멱등 리턴)
+        Enrollment enrollment = enrollmentRepository.findByIdWithLock(enrollmentId)
+                .orElse(null);
+        if (enrollment == null) {
+            return;
+        }
 
-        // 2. Course 비관적 락 획득
+        // 2. Course 비관적 락 획득 (락 순서: Enrollment → Course)
         Course course = courseRepository.findByIdWithLock(enrollment.getCourse().getId())
                 .orElseThrow(() -> new BusinessException(ErrorCode.COURSE_NOT_FOUND));
 

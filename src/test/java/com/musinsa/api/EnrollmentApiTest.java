@@ -125,7 +125,7 @@ class EnrollmentApiTest {
     }
 
     @Test
-    @DisplayName("DELETE /api/enrollments/{id} - 수강취소 성공")
+    @DisplayName("DELETE /api/enrollments/{id} - 수강취소 성공 204")
     void cancelSuccess() throws Exception {
         EnrollmentDtos.Request request = new EnrollmentDtos.Request(student.getId(), course.getId());
 
@@ -138,16 +138,14 @@ class EnrollmentApiTest {
         Long enrollmentId = objectMapper.readTree(response).get("id").asLong();
 
         mockMvc.perform(delete("/api/enrollments/" + enrollmentId))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message").value("수강이 취소되었습니다."));
+                .andExpect(status().isNoContent());
     }
 
     @Test
-    @DisplayName("DELETE /api/enrollments/{id} - 존재하지 않는 수강신청 404")
-    void cancelNotFound() throws Exception {
+    @DisplayName("DELETE /api/enrollments/{id} - 존재하지 않는 수강신청도 204 (멱등)")
+    void cancelNotFound_idempotent() throws Exception {
         mockMvc.perform(delete("/api/enrollments/999999"))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.error").value("ENROLLMENT_NOT_FOUND"));
+                .andExpect(status().isNoContent());
     }
 
     @Test

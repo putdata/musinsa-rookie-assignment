@@ -218,12 +218,10 @@ class EnrollmentServiceTest {
     }
 
     @Test
-    @DisplayName("존재하지 않는 수강신청 취소 시 ENROLLMENT_NOT_FOUND 예외")
-    void cancel_notFound() {
-        assertThatThrownBy(() -> enrollmentService.cancel(999999L))
-                .isInstanceOf(BusinessException.class)
-                .satisfies(e -> assertThat(((BusinessException) e).getErrorCode())
-                        .isEqualTo(ErrorCode.ENROLLMENT_NOT_FOUND));
+    @DisplayName("존재하지 않는 수강신청 취소 시 예외 없이 정상 리턴 (멱등)")
+    void cancel_notFound_idempotent() {
+        enrollmentService.cancel(999999L);
+        // 예외 없이 정상 리턴되면 멱등성 보장 성공
     }
 
     @Test
