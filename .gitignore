@@ -1,0 +1,40 @@
+# ===== Java / Gradle =====
+*.class
+*.jar
+*.war
+*.ear
+*.log
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ===== IDE =====
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+.project
+.classpath
+.settings/
+
+# ===== Node / React =====
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+
+# ===== Misc =====
+*.tmp
+*.bak
+
+# ai agent
+.claude
+.cursor
