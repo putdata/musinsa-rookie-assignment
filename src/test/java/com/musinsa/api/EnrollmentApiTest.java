@@ -142,10 +142,11 @@ class EnrollmentApiTest {
     }
 
     @Test
-    @DisplayName("DELETE /api/enrollments/{id} - 존재하지 않는 수강신청도 204 (멱등)")
-    void cancelNotFound_idempotent() throws Exception {
+    @DisplayName("DELETE /api/enrollments/{id} - 존재하지 않는 수강신청 404")
+    void cancelNotFound() throws Exception {
         mockMvc.perform(delete("/api/enrollments/999999"))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("ENROLLMENT_NOT_FOUND"));
     }
 
     @Test

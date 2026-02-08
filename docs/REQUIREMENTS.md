@@ -146,7 +146,7 @@ Optional<Course> findByIdWithLock(@Param("id") Long id);
 | 중복 신청 | 동일 강좌 중복 신청 불가 | 409 Conflict | DUPLICATE_ENROLLMENT | 이미 신청한 강좌입니다. |
 | 학생 미존재 | 존재하지 않는 학생 ID | 404 Not Found | STUDENT_NOT_FOUND | 학생을 찾을 수 없습니다. |
 | 강좌 미존재 | 존재하지 않는 강좌 ID | 404 Not Found | COURSE_NOT_FOUND | 강좌를 찾을 수 없습니다. |
-| 수강신청 미존재 | 존재하지 않는 수강신청 ID | ~~404~~ 204 No Content | — | 멱등 처리 (ADR-003) |
+| 수강신청 미존재 | 존재하지 않는 수강신청 ID | 404 Not Found | ENROLLMENT_NOT_FOUND | 수강신청 내역을 찾을 수 없습니다. |
 
 ## 4. ERD
 

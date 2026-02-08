@@ -91,12 +91,9 @@ public class EnrollmentService {
 
     @Transactional
     public void cancel(Long enrollmentId) {
-        // 1. Enrollment 비관적 락 조회 (없으면 이미 취소된 것 → 멱등 리턴)
+        // 1. Enrollment 비관적 락 조회
         Enrollment enrollment = enrollmentRepository.findByIdWithLock(enrollmentId)
-                .orElse(null);
-        if (enrollment == null) {
-            return;
-        }
+                .orElseThrow(() -> new BusinessException(ErrorCode.ENROLLMENT_NOT_FOUND));
 
         // 2. Course 비관적 락 획득 (락 순서: Enrollment → Course)
         Course course = courseRepository.findByIdWithLock(enrollment.getCourse().getId())
