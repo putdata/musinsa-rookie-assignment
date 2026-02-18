@@ -38,7 +38,7 @@ public class EnrollmentService {
 
     @Transactional
     public Enrollment enroll(Long studentId, Long courseId) {
-        // 1. Student 비관적 락 획득
+        // 1. Student 비관적 락 획득 (학점/시간표 검증의 원자성 보장)
         Student student = studentRepository.findByIdWithLock(studentId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STUDENT_NOT_FOUND));
 

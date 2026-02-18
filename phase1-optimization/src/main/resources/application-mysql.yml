@@ -19,7 +19,12 @@ spring:
     hibernate:
       ddl-auto: create
     show-sql: false
+    open-in-view: false
     properties:
       hibernate:
         format_sql: false
         dialect: org.hibernate.dialect.MySQLDialect
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
