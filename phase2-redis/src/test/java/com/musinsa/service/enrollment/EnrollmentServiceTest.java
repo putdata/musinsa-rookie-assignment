@@ -16,13 +16,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
-@DirtiesContext(classMode = DirtiesContext.ClassMode.BEFORE_EACH_TEST_METHOD)
+@ActiveProfiles("test")
+@Transactional
 class EnrollmentServiceTest {
 
     @Autowired
@@ -131,7 +133,6 @@ class EnrollmentServiceTest {
     @Test
     @DisplayName("최대 학점(18) 초과 시 CREDIT_LIMIT_EXCEEDED 예외")
     void enroll_creditLimitExceeded() {
-        // 6개 x 3학점 = 18학점 채우기
         for (int i = 0; i < 6; i++) {
             Course course = courseRepository.save(
                     Course.builder()
@@ -146,7 +147,6 @@ class EnrollmentServiceTest {
             enrollmentService.enroll(student.getId(), course.getId());
         }
 
-        // 19학점째 시도
         Course extraCourse = courseRepository.save(
                 Course.builder()
                         .name("추가강좌")

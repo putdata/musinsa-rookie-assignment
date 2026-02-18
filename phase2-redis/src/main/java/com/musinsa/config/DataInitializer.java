@@ -16,10 +16,13 @@ import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.context.annotation.Profile;
+
 import java.util.*;
 
 @Slf4j
 @Component
+@Profile("!test")
 @RequiredArgsConstructor
 public class DataInitializer implements CommandLineRunner {
 
@@ -278,6 +281,9 @@ public class DataInitializer implements CommandLineRunner {
         if (counterService == null) {
             return;
         }
+        counterService.flushAll();
+        log.info("Redis FLUSHDB 완료");
+
         List<Course> courses = courseRepository.findAll();
         for (Course course : courses) {
             counterService.initialize(course.getId(), course.getEnrolled(), course.getCapacity());

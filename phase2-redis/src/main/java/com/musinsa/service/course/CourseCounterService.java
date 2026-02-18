@@ -2,6 +2,7 @@ package com.musinsa.service.course;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
+import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
@@ -16,6 +17,7 @@ import java.util.Map;
 public class CourseCounterService {
 
     private final StringRedisTemplate redisTemplate;
+    private final RedisConnectionFactory connectionFactory;
 
     private static final String ENROLLED_KEY_PREFIX = "course:enrolled:";
     private static final String CAPACITY_KEY_PREFIX = "course:capacity:";
@@ -35,6 +37,10 @@ public class CourseCounterService {
                 "return enrolled"
         );
         TRY_ENROLL_SCRIPT.setResultType(Long.class);
+    }
+
+    public void flushAll() {
+        connectionFactory.getConnection().serverCommands().flushDb();
     }
 
     public void initialize(Long courseId, int enrolled, int capacity) {
