@@ -2,6 +2,7 @@ package com.musinsa.api.queue;
 
 import com.musinsa.api.queue.dtos.QueueDtos;
 import com.musinsa.service.queue.WaitingQueueService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
@@ -15,14 +16,14 @@ public class QueueController {
 
     private final WaitingQueueService waitingQueueService;
 
-    @PostMapping("/enter")
+    @PostMapping("/enroll")
     @ResponseStatus(HttpStatus.ACCEPTED)
-    public QueueDtos.EnterResponse enter(@RequestParam Long studentId) {
-        return waitingQueueService.enter(studentId);
+    public QueueDtos.EnrollResponse enroll(@Valid @RequestBody QueueDtos.EnrollRequest request) {
+        return waitingQueueService.enqueue(request.studentId(), request.courseId());
     }
 
-    @GetMapping("/status/{token}")
-    public QueueDtos.StatusResponse getStatus(@PathVariable String token) {
-        return waitingQueueService.getStatus(token);
+    @GetMapping("/result/{token}")
+    public QueueDtos.ResultResponse getResult(@PathVariable String token) {
+        return waitingQueueService.getResult(token);
     }
 }

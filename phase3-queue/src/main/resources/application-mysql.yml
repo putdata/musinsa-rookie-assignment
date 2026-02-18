@@ -28,3 +28,11 @@ spring:
           batch_size: 50
         order_inserts: true
         order_updates: true
+
+server:
+  tomcat:
+    threads:
+      max: 1000
+      min-spare: 200
+    max-connections: 10000
+    accept-count: 3000
