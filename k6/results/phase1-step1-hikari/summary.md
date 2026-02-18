@@ -1,8 +1,9 @@
 # Phase 1 Step 1: HikariCP 커넥션 풀 튜닝 성능 측정 결과
 
 **측정 일시:** 2026-02-19
-**변경 사항:** HikariCP maximum-pool-size 10 → 30, minimum-idle 5 → 10, connection-timeout 3000ms, idle-timeout 60000ms, max-lifetime 1800000ms
+**변경 사항:** HikariCP maximum-pool-size 10 → 30, minimum-idle 5 → 10 (그 외 설정 변경 없음, OSIV ON 유지)
 **테스트 시나리오:** enrollment-rush (100→500 VU, 4m10s)
+**측정 방법:** phase0-baseline 서버를 커맨드라인 인자로 pool-size만 오버라이드하여 실행
 
 ---
 
@@ -10,19 +11,20 @@
 
 | 지표 | 값 |
 |------|-----|
-| iterations/s | 283.5 |
-| http_req_duration p90 | 101.84ms |
-| http_req_duration p95 | 178.3ms |
-| http_req_duration p99 | 406.57ms |
-| http_req_duration avg | 99.56ms |
-| enroll_success | 2,018건 (3.3/s) |
-| enroll_failed | 171,296건 |
-| enroll_capacity_exceeded | 167,395건 |
-| http_req_failed rate | 98.83% (대부분 정원 초과 409) |
+| iterations/s | 1,474 |
+| http_req_duration p90 | 138ms |
+| http_req_duration p95 | 167.03ms |
+| http_req_duration avg | 46.02ms |
+| http_req_duration max | 972.95ms |
+| enroll_success | 2,018건 (8.07/s) |
+| enroll_failed | 366,389건 |
+| enroll_capacity_exceeded | 358,114건 |
+| http_req_failed rate | 99.45% (대부분 정원 초과 409) |
 | checks passed | 100% (no server error, 5xx 0건) |
-| 총 iterations | 173,279 |
+| 총 iterations | 368,407 |
 | max VUs | 500 |
-| request timeout | 다수 발생 (graceful stop 10분 초과) |
+| request timeout | 0건 |
+| 총 소요 시간 | ~4m10s |
 
 ---
 
@@ -30,22 +32,20 @@
 
 | 지표 | Phase 0 (pool=10) | Step 1 (pool=30) | 변화 |
 |------|-------------------|-------------------|------|
-| iterations/s | 1,310 | 283.5 | -78.4% (악화) |
-| p90 | 198.53ms | 101.84ms | -48.7% (개선) |
-| p95 | 259.01ms | 178.3ms | -31.2% (개선) |
-| p99 | 366.29ms | 406.57ms | +11.0% (악화) |
-| avg | 79.32ms | 99.56ms | +25.5% (악화) |
+| iterations/s | 1,310 | 1,474 | +12.5% (개선) |
+| p90 | 198.53ms | 138ms | -30.5% (개선) |
+| p95 | 259.01ms | 167.03ms | -35.5% (개선) |
+| avg | 79.32ms | 46.02ms | -42.0% (개선) |
 | enroll_success | 2,018 | 2,018 | 동일 |
-| 총 iterations | 298,796 | 173,279 | -42.0% (악화) |
-| request timeout | 0건 | 다수 발생 | 악화 |
-| 총 소요 시간 | ~4m10s | ~10m | 악화 |
+| 총 iterations | 298,796 | 368,407 | +23.3% (개선) |
+| request timeout | 0건 | 0건 | 동일 |
+| 총 소요 시간 | ~4m10s | ~4m10s | 동일 |
 
 ---
 
 ## 분석
 
-- **처리량 급감**: 커넥션 풀을 30으로 늘리자 더 많은 커넥션이 동시에 MySQL 비관적 락을 경합하게 되어 lock wait가 증가하고 전체 처리량이 78% 급감했다.
-- **p90/p95 개선**: 동시 접속 가능한 커넥션이 많아져 커넥션 대기 시간이 줄어 중간 구간 응답 시간은 개선되었다.
-- **p99 악화 + timeout**: 동시 락 경합이 심해지면서 일부 요청이 극단적으로 느려졌고, 결국 request timeout이 발생하여 graceful stop이 10분까지 늘어났다.
-- **CPU 100%**: 500 VU × 30 커넥션 풀 조합이 MySQL 락 경합 + JVM 스레드 경합을 동시에 유발하여 CPU가 100%를 기록했다.
-- **결론**: 비관적 락 기반 시스템에서 커넥션 풀만 늘리는 것은 오히려 역효과. 쿼리 최적화와 인덱스 추가로 락 보유 시간을 줄여야 실질적 개선이 가능하다.
+- **처리량 개선**: pool-size를 10→30으로 늘린 결과, iterations/s가 1,310→1,474로 12.5% 증가했다. 커넥션 대기 병목이 해소되면서 전체 처리량이 개선되었다.
+- **응답 시간 대폭 개선**: 평균 응답 시간이 79.32ms→46.02ms로 42% 감소, p95도 259.01ms→167.03ms로 35.5% 개선되었다.
+- **안정성 유지**: 500 VU에서도 5xx 에러 0건, request timeout 0건으로 안정적으로 동작했다.
+- **결론**: 비관적 락 기반 시스템에서도 커넥션 풀 확대만으로 의미 있는 성능 개선(처리량 +12.5%, 응답시간 -42%)이 가능하다.

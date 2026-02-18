@@ -111,6 +111,8 @@ k6 run k6/scenarios/mixed-workload.js
 수강신청 시스템의 동시성 처리 성능을 단계적으로 개선한 과정입니다.
 각 Phase는 이전 Phase의 최적화를 누적하며, k6 부하 테스트로 효과를 측정했습니다.
 
+> **테스트 환경:** 로컬 WSL2에서 Spring Boot 서버, Docker MySQL/Redis를 동일 머신에서 실행. 독립된 서버 환경이 아니므로 측정 간 10~15% 편차가 발생할 수 있으며, 절대값보다 Phase 간 상대적 추이에 의미가 있습니다.
+>
 > 테스트 공통 조건: MySQL 8.0 + 인기 강좌 50개 (정원 합계 2,018명), 학생 10,000명, 수강신청 러시 시나리오
 
 ### Phase 0 — Baseline
@@ -123,23 +125,24 @@ Spring Boot + MySQL + 비관적 락. 별도 최적화 없이 기본 설정 그�
 
 ### Phase 1 — 커넥션 & JPA 최적화
 
-HikariCP 풀 확대, OSIV OFF, Hibernate 배치 처리, MySQL 인덱스를 적용했습니다.
+HikariCP 풀 확대, OSIV OFF, MySQL 인덱스를 적용했습니다.
 
 | 단계 | 변경 | 효과 |
 |------|------|------|
-| Step 1 | HikariCP pool 10→30 | 단독 적용 시 오히려 타임아웃 발생 (커넥션 점유 시간이 병목) |
-| Step 2 | OSIV OFF + Hibernate batch | 커넥션 점유 시간 단축 → pool 확대와 시너지 |
+| Step 1 | HikariCP pool 10→30 | 처리량 +12.5%, 평균 응답시간 -42% (커넥션 대기 병목 해소) |
+| Step 2 | OSIV OFF | pool=30 위에 추가 개선 (+1.4% 처리량, -4.1% avg) |
 | Step 3 | 복합 인덱스 추가 | INSERT 부하로 미미한 효과 (-2.4%) |
 
 - p95: 259ms → **205ms** (-20.8%)
-- 핵심 교훈: 풀 크기보다 **커넥션 점유 시간 단축**이 먼저
+- 핵심 교훈: 풀 확대로 기본 개선 확보 후, OSIV OFF로 커넥션 회전율을 높여 추가 개선
 
 ### Phase 2 — Redis 원자 연산 + 캐싱
 
-DB 비관적 락을 Redis DECR 원자 연산으로 대체하고, 강좌 정보를 Redis에 캐싱했습니다.
+Redis DECR 원자 연산으로 정원 초과를 사전 차단하고, 강좌 정보를 Redis에 캐싱했습니다.
 
-- DB 행 수준 락 제거 → Redis 단일 스레드 보장으로 동시성 제어
+- Redis로 정원 초과 요청을 DB 도달 전에 즉시 거절 (fast rejection)
 - 강좌 조회가 Redis에서 처리되어 DB 부하 대폭 감소
+- DB 비관적 락은 최종 방어선으로 유지 (중복 신청, 학점 초과 등 검증)
 - p95: 205ms → **9.66ms** (-95.3%) / 처리량: 1,478 → **2,225 iter/s** (+50.6%)
 
 ### Phase 3 — Redis Sorted Set 대기열
