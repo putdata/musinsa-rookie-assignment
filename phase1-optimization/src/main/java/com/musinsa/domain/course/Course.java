@@ -10,7 +10,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "courses")
+@Table(name = "courses",
+        indexes = {
+            @Index(name = "idx_course_department_id", columnList = "department_id")
+        })
 @Getter
 @Builder
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
