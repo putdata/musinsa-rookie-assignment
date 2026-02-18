@@ -35,6 +35,9 @@ Thumbs.db
 *.tmp
 *.bak
 
+# ===== k6 large result files =====
+k6/results/**/*.json
+
 # ai agent
 .claude
 .cursor
