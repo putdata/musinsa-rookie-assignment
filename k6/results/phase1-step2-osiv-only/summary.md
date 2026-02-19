@@ -1,63 +1,54 @@
-# Phase 1 Step 2b: OSIV 비활성화 순수 효과 측정 (pool=10 유지)
+# Phase 1 Step 2: HikariCP pool=30 + OSIV OFF 성능 측정 결과 (Instant Spike)
 
 **측정 일시:** 2026-02-19
-**변경 사항:** spring.jpa.open-in-view=false, Hibernate batch_size=50, order_inserts/updates=true
-**HikariCP:** Phase 0과 동일 (maximum-pool-size=10, minimum-idle=5)
-**목적:** HikariCP 변경 없이 OSIV OFF만의 순수 효과 측정
-**테스트 시나리오:** enrollment-rush (100→500 VU, 4m10s)
+**k6 시나리오:** enrollment-rush (instant spike 500VU, ~1m21s)
+**변경 사항:** HikariCP pool=30 + spring.jpa.open-in-view=false (CLI 오버라이드)
+**베이스:** phase0-baseline (인덱스 없음, Tomcat threads=200)
 
----
-
-## Enrollment Rush 결과
+## Enrollment Rush 결과 (전체)
 
 | 지표 | 값 |
 |------|-----|
-| iterations/s | 1,307.0 |
-| http_req_duration p90 | 199.67ms |
-| http_req_duration p95 | 252.59ms |
-| http_req_duration p99 | - |
-| http_req_duration avg | 77.86ms |
-| enroll_success | 2,018건 (8.8/s) |
-| enroll_failed | 299,265건 |
-| enroll_capacity_exceeded | 292,468건 |
-| http_req_failed rate | 99.33% (대부분 정원 초과 409) |
-| checks passed | 100% (no server error, 5xx 0건) |
-| 총 iterations | 301,283 |
+| iterations/s | 1,905.1 |
+| http_req_duration p95 | 142.0ms |
+| http_req_duration avg | 112.2ms |
+| http_req_duration med | 117.5ms |
+| http_req_duration max | 523.0ms |
+| enroll_success | 2,018 (24.9/s) |
+| enroll_failed | 152,444 |
+| enroll_capacity_exceeded | 148,943 |
+| checks passed | 100% (154,462/154,462) |
+| 총 iterations | 154,462 |
 | max VUs | 500 |
-| request timeout | 0건 |
-| 총 소요 시간 | ~3m50s (정상) |
 
----
+## Burst 구간 (0~25초, 정원 경쟁)
 
-## 변수 분리 비교표 (enrollment-rush 시나리오)
+| 지표 | 값 |
+|------|-----|
+| enroll_duration_burst p95 | 204.6ms |
+| enroll_duration_burst avg | 126.4ms |
+| enroll_success_burst | 2,018 |
 
-| 지표 | Phase 0 (pool=10, OSIV ON) | OSIV OFF only (pool=10, OSIV OFF) | HikariCP only (pool=30, OSIV ON) | 둘 다 적용 (pool=30, OSIV OFF) |
-|------|---------------------------|-----------------------------------|----------------------------------|-------------------------------|
-| iterations/s | 1,310 | **1,307** | 1,474 | **1,494** |
-| p90 | 198.53ms | **199.67ms** | 138ms | **132.26ms** |
-| p95 | 259.01ms | **252.59ms** | 167.03ms | **153.85ms** |
-| avg | 79.32ms | **77.86ms** | 46.02ms | **44.12ms** |
-| 총 iterations | 298,796 | **301,283** | 368,407 | **373,278** |
-| request timeout | 0 | **0** | 0 | **0** |
-| enroll_success | 2,018 | **2,018** | 2,018 | **2,018** |
+## Sustained 구간 (25초~, 정원 소진 후)
 
----
+| 지표 | 값 |
+|------|-----|
+| enroll_duration_sustained p95 | 132.5ms |
+| enroll_duration_sustained avg | 108.5ms |
+| enroll_success_sustained | 0 |
+
+## Step 1 vs Step 2 비교
+
+| 지표 | Step 1 (pool=30) | Step 2 (+ OSIV OFF) | 변화 |
+|------|-------------------|----------------------|------|
+| iterations/s | 1,905.5 | 1,905.1 | -0.0% |
+| p95 (전체) | 143.5ms | 142.0ms | -1.0% |
+| avg (전체) | 112.2ms | 112.2ms | 0.0% |
+| burst p95 | 205.0ms | 204.6ms | -0.2% |
+| burst avg | 124.6ms | 126.4ms | +1.4% |
 
 ## 분석
 
-### OSIV OFF 단독 효과 (pool=10 기준)
-- Phase 0과 거의 동일한 수치 (iterations/s: 1,310 → 1,307, avg: 79.32ms → 77.86ms)
-- **pool=10에서는 OSIV OFF 효과가 미미하다.**
-- 이유: pool=10이면 동시에 10개 커넥션만 사용 가능하고, 비관적 락 경합이 이미 병목이므로 커넥션 보유 시간을 줄여도 대기 중인 요청이 즉시 커넥션을 가져갈 수 없다.
-
-### HikariCP 단독 효과 (OSIV ON 기준)
-- pool=30으로 늘리면 처리량 12.5% 증가, avg 42% 감소. 커넥션 대기 병목이 해소되면서 전반적 개선.
-
-### 두 최적화의 조합 (pool=30 + OSIV OFF)
-- pool=30 + OSIV OFF = Phase 0 대비 처리량 14.0% 증가, avg 44.4% 감소.
-- HikariCP 확대(+12.5%)에 OSIV OFF가 소폭 추가 개선(+1.4%p 처리량, -4.1% avg)을 제공.
-
-### 핵심 인사이트
-> - 커넥션 풀 확대가 주요 개선 요인 (+12.5%)
-> - OSIV OFF는 pool=10에서는 효과 미미하지만, pool=30과 함께 적용 시 소폭 추가 개선 (+1.4% 처리량, -4.1% avg)
-> - 두 최적화 모두 적용했을 때 가장 좋은 결과 (처리량 +14.0%, avg -44.4%)
+- **OSIV OFF 효과 없음**: Step 1 대비 측정 오차 범위 내 차이. instant spike에서는 OSIV 설정 변경이 성능에 영향을 주지 않음.
+- **이유**: 비관적 락 경합이 지배적 병목이므로, 커넥션 보유 시간(OSIV)을 줄여도 락 대기 시간에 변화 없음.
+- **이전 점진적 ramp-up에서는 소폭 개선**(+1.4% 처리량)이 있었으나, instant spike에서는 효과가 사라짐.
