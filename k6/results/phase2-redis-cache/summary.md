@@ -1,79 +1,55 @@
-# Phase 2: Redis 원자 연산 기반 수강 인원 관리 + 캐싱 성능 측정 결과
+# Phase 2: Redis 원자 연산 + 캐싱 성능 측정 결과 (Instant Spike, java -jar)
 
 **측정 일시:** 2026-02-19
-**변경 사항:** Redis 원자 연산(INCR/DECR) 기반 수강 인원 관리 + 강좌 정보 캐싱
-**누적 최적화:** HikariCP pool=30 + OSIV OFF + Hibernate batch + 인덱스 + Redis 원자 연산/캐싱
+**k6 시나리오:** enrollment-rush (instant spike 500VU, ~1m21s)
+**실행 방법:** `java -jar phase2-redis.jar --spring.profiles.active=mysql,redis --server.tomcat.threads.max=500 --server.tomcat.threads.min-spare=100`
+**누적 최적화:** Phase 1 전체 + Redis INCR/DECR 원자 연산 + 강좌 캐싱
 **프로파일:** mysql,redis
 
----
-
-## Enrollment Rush 결과 (100→500 VU, 4m10s)
+## Enrollment Rush 결과 (전체)
 
 | 지표 | 값 |
 |------|-----|
-| iterations/s | 2,224.9 |
-| http_req_duration p90 | 7.02ms |
-| http_req_duration p95 | 9.66ms |
-| http_req_duration p99 | 17.54ms |
-| http_req_duration avg | 4.31ms |
-| enroll_success | 2,018건 (8.71/s) |
-| enroll_failed | 513,196건 |
-| enroll_capacity_exceeded | 513,179건 |
-| http_req_failed rate | 99.60% (대부분 정원 초과 409) |
-| checks passed | 100% (no server error, 5xx 0건) |
-| 총 iterations | 515,214 |
+| iterations/s | 3,788 |
+| http_req_duration p95 | 10.5ms |
+| http_req_duration avg | 6.2ms |
+| http_req_duration med | 3.0ms |
+| http_req_duration max | 1,316ms |
+| enroll_success | 2,018 (24.9/s) |
+| enroll_failed | 305,197 |
+| enroll_capacity_exceeded | 305,172 |
+| checks passed | 100% (307,215/307,215) |
+| 총 iterations | 307,215 |
 | max VUs | 500 |
 
----
-
-## Mixed Workload 결과 (100 VU, 4분)
+## Burst 구간 (0~25초, 정원 경쟁)
 
 | 지표 | 값 |
 |------|-----|
-| iterations/s | 175.4 |
-| http_req_duration p90 | 17.3ms |
-| http_req_duration p95 | 20.03ms |
-| http_req_duration p99 | 25.17ms |
-| http_req_duration avg | 7.27ms |
-| http_req_failed rate | 6.20% (수강신청 비즈니스 에러) |
-| checks passed | 100% (no server error) |
-| 총 iterations | 41,395 |
-| max VUs | 100 |
+| enroll_duration_burst p95 | 43.5ms |
+| enroll_duration_burst avg | 15.7ms |
+| enroll_success_burst | 2,018 |
 
----
+## Sustained 구간 (25초~, 정원 소진 후)
 
-## Phase 0~2 비교표 (Enrollment Rush 기준)
+| 지표 | 값 |
+|------|-----|
+| enroll_duration_sustained p95 | 9.0ms |
+| enroll_duration_sustained avg | 3.7ms |
+| enroll_success_sustained | 0 |
 
-| 지표 | Phase 0 (baseline) | Phase 1 (최적화) | Phase 2 (Redis) | Phase 0→2 개선율 |
-|------|-------------------|-----------------|----------------|-----------------|
-| iterations/s | 1,310 | 1,477.6 | **2,224.9** | +69.8% |
-| p90 | 198.53ms | 171.1ms | **7.02ms** | -96.5% |
-| p95 | 259.01ms | 204.99ms | **9.66ms** | -96.3% |
-| p99 | 366.29ms | - | **17.54ms** | -95.2% |
-| avg | 79.32ms | 57.44ms | **4.31ms** | -94.6% |
-| 총 iterations | 298,796 | 340,827 | **515,214** | +72.4% |
-| enroll_success | 2,018 | 2,018 | 2,018 | 동일 (정합성 유지) |
-| 5xx 에러 | 0 | 0 | 0 | 안정적 |
+## Phase 1 Step 2 (최적) vs Phase 2 비교
 
----
+| 지표 | Phase 1 Step 2 | Phase 2 (Redis) | 변화 |
+|------|---------------|-----------------|------|
+| iterations/s | 3,248 | 3,788 | +16.6% |
+| p95 (전체) | 43.5ms | 10.5ms | **-75.9%** |
+| avg (전체) | 24.2ms | 6.2ms | **-74.4%** |
+| burst avg | 42.5ms | 15.7ms | **-63.1%** |
+| sustained avg | 19.8ms | 3.7ms | **-81.3%** |
 
 ## 분석
 
-### Redis 원자 연산의 극적인 성능 개선
-- **처리량**: 1,310 → 2,224.9 iter/s (Phase 0 대비 **+69.8%**)
-- **p95 응답시간**: 259.01ms → 9.66ms (Phase 0 대비 **-96.3%**)
-- **평균 응답시간**: 79.32ms → 4.31ms (Phase 0 대비 **-94.6%**)
-
-### 핵심 개선 원인
-1. **MySQL 비관적 락 제거**: 수강 인원 관리를 Redis INCR/DECR 원자 연산으로 전환하여 DB 행 수준 락 대기 제거
-2. **강좌 정보 캐싱**: 강좌 조회 시 Redis 캐시 히트로 DB 부하 감소
-3. **DB 커넥션 경합 감소**: Redis로 읽기/카운트 연산을 오프로드하여 MySQL 커넥션 풀 압박 완화
-
-### 정합성 확인
-- enroll_success가 모든 Phase에서 **정확히 2,018건**으로 동일
-- 인기 강좌(1~50번) × 정원(30~50명) 조합의 정확한 정원 제어 유지
-- Redis 원자 연산의 동시성 제어가 MySQL 비관적 락과 동등한 정합성 보장
-
-### Mixed Workload 인사이트
-- 40% 조회 + 40% 수강신청 + 15% 시간표 + 5% 취소 혼합 부하에서 p95 20.03ms
-- http_req_failed 6.20%는 수강신청의 비즈니스 에러(정원 초과/중복 등)이며, 5xx 서버 에러는 0건
+- **Redis 효과 극대화**: 정원 소진 후 Redis INCR로 즉시 거절 → DB 접근 없이 3.7ms avg 응답.
+- **burst 구간에서도 개선**: burst avg 42.5ms → 15.7ms. Redis 원자 연산이 DB 락 경합을 대폭 감소.
+- **med 3.0ms**: 대부분의 요청이 Redis에서 즉시 처리됨 (정원 초과 거절).
