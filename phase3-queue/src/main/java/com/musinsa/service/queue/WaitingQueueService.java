@@ -97,24 +97,30 @@ public class WaitingQueueService {
     }
 
     public QueueDtos.ResultResponse getResult(String token) {
-        // 결과가 있으면 반환
+        // 1. 결과가 있으면 반환
         String status = (String) redisTemplate.opsForHash().get(RESULT_PREFIX + token, "status");
         if (status != null) {
             String message = (String) redisTemplate.opsForHash().get(RESULT_PREFIX + token, "message");
             return new QueueDtos.ResultResponse(token, status, message);
         }
 
-        // ZSCORE O(1)로 대기열 존재 확인 (기존 ZRANK는 O(log N))
-        Double score = redisTemplate.opsForZSet().score(QUEUE_KEY, token);
-        if (score != null) {
-            String seqStr = (String) redisTemplate.opsForHash().get(REQUEST_PREFIX + token, "seq");
+        // 2. request:{token} 존재 → 대기 중 또는 처리 중 (popMin 후에도 request 해시는 남아있음)
+        String seqStr = (String) redisTemplate.opsForHash().get(REQUEST_PREFIX + token, "seq");
+        if (seqStr != null) {
             String processedStr = redisTemplate.opsForValue().get(PROCESSED_KEY);
-            long seq = seqStr != null ? Long.parseLong(seqStr) : 0;
+            long seq = Long.parseLong(seqStr);
             long processed = processedStr != null ? Long.parseLong(processedStr) : 0;
             long approxPosition = Math.max(seq - processed, 1);
             return new QueueDtos.ResultResponse(token, "WAITING", "대기 순번: " + approxPosition);
         }
 
+        // 3. request 만료 시 ZSET fallback (request TTL 30분 < 큐 체류 시간인 경우)
+        Double score = redisTemplate.opsForZSet().score(QUEUE_KEY, token);
+        if (score != null) {
+            return new QueueDtos.ResultResponse(token, "WAITING", "대기 중입니다");
+        }
+
+        // 4. 어디에도 없으면 NOT_FOUND
         return new QueueDtos.ResultResponse(token, "NOT_FOUND", "요청을 찾을 수 없습니다");
     }
 

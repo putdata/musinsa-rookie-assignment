@@ -305,3 +305,4 @@ AI와의 협업 과정을 기록한 프롬프트 이력입니다.
 | [004](docs/decisions/004-redis-atomic-enrollment-counter.md) | Redis 원자 연산 기반 수강 인원 관리 | Accepted |
 | [005](docs/decisions/005-phase1-optimization-analysis.md) | Phase 1 최적화 개별 효과 검증 및 인덱스/배치 불필요 결정 | Accepted |
 | [006](docs/decisions/006-phase2-redis-cache-memory-analysis.md) | Phase 2 강좌 캐시 Redis 메모리 적재 가능성 분석 | Accepted |
+| [007](docs/decisions/007-getresult-race-condition-fix.md) | getResult() NOT_FOUND 레이스 컨디션 제거 | Accepted |
