@@ -2,10 +2,9 @@
 
 **측정 일시:** 2026-02-19
 **실행 방법:** `java -jar phase3-queue.jar --spring.profiles.active=mysql,redis`
-**변경 사항:** Redis Sorted Set 기반 수강신청 대기열 시스템 (서버 자동 처리, BATCH_SIZE=50, 순번 기반 폴링)
-**누적 최적화:** HikariCP pool=30 + OSIV OFF + Hibernate batch + 인덱스 + Redis 원자 연산/캐싱 + 대기열 + Tomcat 1000스레드
+**누적 최적화:** HikariCP pool=30 + OSIV OFF + Redis 원자 연산/캐싱 + 대기열 + 20스레드 병렬 처리 + Lua Script enqueue + Tomcat 5000스레드
 **프로파일:** mysql,redis
-**테스트 시나리오:** queue-enrollment-rush (1 VU = 1 학생, 1초만에 1000명 instant spike, 1m 지속, 5s 쿨다운, 총 ~1m6s)
+**테스트 시나리오:** queue-enrollment-rush (1초 instant spike, 1m 지속, 5s 쿨다운)
 
 ---
 
@@ -14,11 +13,11 @@
 ```
 학생(클라이언트)                         서버
   │                                      │
-  ├─ POST /api/queue/enroll ──────────►  │ Redis Sorted Set에 요청 적재
+  ├─ POST /api/queue/enroll ──────────►  │ Lua Script: HSET+ZADD 원자 실행
   │  {studentId, courseId}               │ → token + 대기순번 반환
   │                                      │
   │                                      │ @Scheduled(fixedDelay=100ms)
-  │                                      │ ZPOPMIN으로 50건씩 꺼내서
+  │                                      │ ZPOPMIN 50건 → 20스레드 병렬 처리
   │                                      │ EnrollmentService.enroll() 자동 호출
   │                                      │ → 결과를 Redis Hash에 저장
   │                                      │
@@ -42,51 +41,47 @@
 
 ---
 
-## Queue Enrollment Rush 결과 (1초만에 1000명 instant spike, ~1m8s)
+## Queue Enrollment Rush 결과 (3,000 VU, 3회 측정 평균)
 
-| 지표 | 값 |
-|------|-----|
-| iterations/s | 182.9 |
-| http_reqs/s | 540.0 |
-| http_req_duration avg | 5.01ms |
-| http_req_duration p90 | 2.0ms |
-| http_req_duration p95 | **2.49ms** |
-| http_req_duration med | 0.71ms |
-| http_req_duration max | 585.5ms |
-| queue_submit_duration avg | 13.55ms |
-| queue_submit_duration p95 | 4.50ms |
-| queue_wait_duration avg | 4,196ms |
-| queue_wait_duration p95 | 9,004ms |
-| **enroll_success** | **2,018건** |
-| **enroll_failed** | **10,434건** |
-| enroll_success + enroll_failed | **12,452건** (= 총 iterations) |
-| http_req_failed rate | **0.00%** |
-| checks passed | 100% (12,452/12,452) |
-| iteration_duration avg | 5.2s |
-| iteration_duration p95 | 10s |
-| 총 iterations | 12,452 |
-| 총 http_reqs | 36,765 |
-| interrupted iterations | **0건** (전원 정상 완료) |
-| max VUs | **1,000** |
+| 지표 | 1차 | 2차 | 3차 | 평균 |
+|------|-----|-----|-----|------|
+| iterations/s | 401 | 394 | 388 | **394** |
+| http_reqs/s | 1,095 | 1,070 | 1,079 | **1,081** |
+| http_req_duration p95 | 4.0ms | 8.0ms | 4.5ms | **5.5ms** |
+| http_req_duration avg | 34.6ms | 30.0ms | 31.3ms | **31.9ms** |
+| http_req_duration med | 0.62ms | 1.0ms | 1.0ms | **0.87ms** |
+| queue_submit p95 | 899ms | 773ms | 823ms | **832ms** |
+| queue_submit avg | 92.5ms | 79.0ms | 84.9ms | **85.5ms** |
+| queue_wait avg | 5,897ms | 5,875ms | 5,912ms | **5,895ms** |
+| queue_wait p95 | 8,002ms | 8,003ms | 8,002ms | **8,002ms** |
+| **enroll_success** | **2,018** | **2,018** | **2,018** | **2,018** |
+| enroll_failed | 26,652 | 26,636 | 26,489 | 26,592 |
+| http_req_failed | 0.00% | 0.01% | 0.18% | **~0.06%** |
+| checks_failed | 0.00% | 0.04% | 0.52% | **~0.19%** |
+| iteration_duration avg | 7.0s | 7.0s | 7.0s | **7.0s** |
+| iteration_duration p95 | 9.0s | 9.0s | 9.0s | **9.0s** |
+| 총 iterations | 28,670 | 28,668 | 28,658 | **28,665** |
+| max VUs | 3,000 | 3,000 | 3,000 | **3,000** |
 
 ---
 
 ## Phase 0~3 전체 비교표
 
-| 지표 | Phase 0 | Phase 1 (Step 2) | Phase 2 (Redis) | Phase 3 (대기열) |
-|------|---------|-------------------|-----------------|-----------------|
-| http_req_duration p95 | 128ms | 43.5ms | 10.5ms | **2.49ms** |
-| http_req_duration avg | 70.0ms | 24.2ms | 6.2ms | **5.01ms** |
+| 지표 | Phase 0 | Phase 1 (Step 2) | Phase 2 (Redis) | Phase 3 (3,000 VU) |
+|------|---------|-------------------|-----------------|-------------------|
+| http_req_duration p95 | 128ms | 43.5ms | 10.5ms | **5.5ms** |
+| http_req_duration avg | 70.0ms | 24.2ms | 6.2ms | **31.9ms** ※ |
 | enroll_success | 2,018 | 2,018 | 2,018 | **2,018** |
-| 총 수강신청 시도 | 192,698 | 263,242 | 307,215 | **12,452** |
-| 불필요한 실패 요청 | 190,680 | 261,224 | 305,197 | **10,434** |
+| 총 수강신청 시도 | 192,698 | 263,242 | 307,215 | **28,665** |
+| 불필요한 실패 요청 | 190,680 | 261,224 | 305,197 | **26,592** |
 | 5xx 에러 | 0 | 0 | 0 | **0** |
-| checks passed | 100% | 100% | 100% | **100%** |
-| max VUs | 500 | 500 | 500 | **1,000** |
+| max VUs | 500 | 500 | 500 | **3,000** |
 
+> ※ Phase 3 avg가 높은 이유: 초반 3,000명 instant spike 시 Lua Script enqueue가 직렬 실행되면서 일부 submit 응답이 길어짐. med(중앙값)는 0.87ms로 대부분의 요청은 1ms 이내.
+>
 > **비교 시 유의사항:**
-> - Phase 0~2: enrollment-rush 시나리오 (500 VU, instant spike, 직접 수강신청). 즉시 응답 → 즉시 재시도.
-> - Phase 3: queue-enrollment-rush 시나리오 (1000 VU, instant spike, 대기열). 1 VU = 1 학생 고정. 신청 → 서버 자동 처리 → 결과 폴링 → 다음 강좌.
+> - Phase 0~2: enrollment-rush (500 VU, 직접 수강신청). 즉시 응답 → 즉시 재시도.
+> - Phase 3: queue-enrollment-rush (3,000 VU, 대기열). 1 VU = 1 학생. 신청 → 서버 자동 처리 → 결과 폴링 → 다음 강좌.
 > - 모든 Phase는 `java -jar`로 실행하여 측정.
 
 ---
@@ -99,28 +94,37 @@
 | 수강신청 방식 | 버튼 클릭 → 즉시 성공/실패 | 버튼 클릭 → 대기 → 자동 처리 → 결과 통보 |
 | 정원 찬 강좌 | 즉시 "정원 초과" 에러 | 대기열에서 처리 후 "정원 초과" 결과 |
 | 재시도 패턴 | 미친듯이 버튼 연타 | 결과 받고 다른 강좌 신청 |
-| 학생당 평균 시도 | 수백~수천 회 (같은 강좌 반복) | **~1.6회** (서로 다른 강좌 순차) |
-| 동시 접속 한계 | 500 VU | **1,000 VU** (2배) |
+| 동시 접속 한계 | 500 VU | **3,000 VU** (6배) |
 
 ### 2. 서버 부하의 극적 감소
-- **총 수강신청 시도**: 192,698건 → **12,452건** (**-93.5%**)
-- **불필요한 실패 요청**: 190,680건 → **10,434건** (**-94.5%**)
+- **총 수강신청 시도**: 192,698건 → **28,665건** (**-85.1%**)
+- **불필요한 실패 요청**: 190,680건 → **26,592건** (**-86.1%**)
 - 순번 기반 폴링 간격이 뒤쪽 학생의 불필요한 요청을 억제
 
 ### 3. HTTP 에러율
 - **Phase 0~2**: 대부분의 요청이 409 정원 초과
-- **Phase 3**: http_req_failed **0.00%**
+- **Phase 3**: http_req_failed **~0.06%**
 - 수강신청 결과가 HTTP 에러가 아닌 결과 데이터(SUCCESS/FAILED)로 전달
 
 ### 4. 사용자 체감 대기 시간
-- **queue_wait_duration avg**: 4,196ms (신청 후 결과까지 평균 ~4초)
-- **queue_wait_duration p95**: 9,004ms (최대 ~9초)
-- 1,000명이 1초만에 몰리는 극한 상황에서도 대부분 10초 이내 결과 확인
+- **queue_wait avg**: 5,895ms (신청 후 결과까지 평균 ~6초)
+- **queue_wait p95**: 8,002ms (최대 ~8초)
+- 3,000명이 1초만에 몰리는 극한 상황에서 대부분 9초 이내 결과 확인
 
 ### 5. 데이터 정합성
-- **enroll_success**: 2,018건 (모든 Phase에서 동일)
-- 인기 강좌(1~50번) 정원 합계와 정확히 일치
-- 대기열 순차 처리에서도 동시성 제어 정확히 동작
+- **enroll_success**: 3회 모두 정확히 **2,018건**
+- 인기 강좌(1~50번) 정원 합계와 100% 일치
+- 20스레드 병렬 처리에서도 동시성 제어 정확히 동작
+
+---
+
+## Phase 3 내부 최적화 이력
+
+| 개선 | 효과 (3,000 VU 기준) |
+|------|---------------------|
+| **병렬 처리** (20스레드) | queue_wait -57%, 처리량 2배 (181→394 iter/s) |
+| **Tomcat 튜닝** (5000스레드) | submit p95 -95% (Redis-only 엔드포인트) |
+| **Lua Script** (enqueue 1회 왕복) | TCP 연결 점유 시간 감소, 연결 실패 대폭 감소 |
 
 ---
 
@@ -128,14 +132,14 @@
 
 | 개선 항목 | Phase 0 → Phase 3 | 개선율 |
 |-----------|-------------------|--------|
-| HTTP 응답시간 p95 | 128ms → 2.49ms | **-98.1%** |
-| 총 수강신청 시도 | 192,698건 → 12,452건 | **-93.5%** |
-| 불필요한 실패 요청 | 190,680건 → 10,434건 | **-94.5%** |
-| 동시 접속 한계 | 500 VU → 1,000 VU | **2배 증가** |
+| HTTP 응답시간 p95 | 128ms → 5.5ms | **-95.7%** |
+| 총 수강신청 시도 | 192,698건 → 28,665건 | **-85.1%** |
+| 불필요한 실패 요청 | 190,680건 → 26,592건 | **-86.1%** |
+| 동시 접속 한계 | 500 VU → 3,000 VU | **6배 증가** |
 | 서버 에러 | 0건 → 0건 | 안정적 유지 |
 | 수강 성공 | 2,018건 → 2,018건 | 정합성 유지 |
 
 ### 각 Phase별 핵심 기여
 1. **Phase 1** (HikariCP pool=30 + OSIV OFF): 커넥션 관리 최적화 → p95 -66.0%
 2. **Phase 2** (Redis 원자 연산): DB 락 제거 → p95 -75.9% (Phase 0 대비 -91.8%)
-3. **Phase 3** (대기열): 서버 자동 처리 + 순번 기반 폴링 → p95 -76.3%, HTTP 에러율 0%, 동시 접속 2배, 불필요한 트래픽 94.5% 감소
+3. **Phase 3** (대기열 + 병렬 + Lua): 패러다임 전환 → p95 -47.6%, HTTP 에러율 ~0%, 동시 접속 6배, 불필요한 트래픽 86.1% 감소
