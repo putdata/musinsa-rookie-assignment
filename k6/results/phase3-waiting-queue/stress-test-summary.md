@@ -63,7 +63,7 @@ for (future : futures) {
 | enroll_success | **2,018** | **2,018** |
 | checks_failed | 0.00% | 11.20% (3,920건) |
 
-**5,000 VU에서 checks_failed 11.20%**: 단일 머신 TCP 연결 한계. `http_req_duration min=0s`로 서버 도달 전 연결 실패. 애플리케이션 자체는 정상.
+**5,000 VU에서 checks_failed 11.20%**: 단일 머신에서 서버(java -jar) + k6 + Docker(MySQL, Redis)를 동시 실행하므로, 5,000개 TCP 연결이 1초에 몰리면 OS 수준에서 연결이 실패함 (`http_req_duration min=0s`로 서버 도달 전 끊어짐). 애플리케이션 자체는 정상이며, 서버 분리 시 해소될 환경 한계.
 
 ---
 
@@ -105,24 +105,12 @@ return {rank, total}
 
 | 지표 | 병렬만 (6회 왕복) | + Lua (1회 왕복) | 변화 |
 |------|-----------------|-----------------|------|
-| **checks_failed** | 11.20% (3,920) | **2.5~8.7% (793~2,986)** | **최대 -79.8%** |
-| **http_req_failed** | 3.66% | **0.75~2.78%** | **최대 -79.5%** |
 | queue_submit p95 | 12ms | 714~1,399ms | Lua 직렬화 영향* |
 | enroll_success | 2,018 | **2,018** | 정합성 유지 |
 
-\* Lua Script는 Redis에서 원자적(싱글 스레드)으로 실행되므로 5,000개가 직렬 대기. 하지만 TCP 연결 점유 시간이 6분의 1로 줄어 연결 실패가 대폭 감소.
+\* Lua Script는 Redis에서 원자적(싱글 스레드)으로 실행되므로 5,000개가 직렬 대기. 네트워크 왕복은 6→1로 줄지만 Redis 직렬 실행으로 submit 응답이 길어짐.
 
 ---
-
-## 전체 개선 효과 요약
-
-### 각 개선이 해결한 것
-
-| 개선 | 효과 | 핵심 원리 |
-|------|------|----------|
-| **병렬 처리** (20스레드) | queue_wait **-57%**, 처리량 **2배** | DB 커넥션 풀 실제 활용 |
-| **Tomcat 튜닝** (5000스레드) | submit p95 **-95%** | Redis-only 엔드포인트에 쓰레드 확대 순수 이점 |
-| **Lua Script** (1회 왕복) | TCP 연결 실패 **최대 -80%** | 네트워크 왕복 6→1, 연결 점유 시간 감소 |
 
 ### Phase 1 vs Phase 3 Tomcat 튜닝 차이
 
@@ -135,11 +123,63 @@ return {rank, total}
 
 | 장점 | 단점 |
 |------|------|
-| TCP 연결 점유 시간 6분의 1 | 5,000개 Lua 직렬 실행으로 submit p95 증가 |
-| 연결 실패 대폭 감소 | Redis 싱글 스레드 병목 노출 |
-| 원자적 실행 (데이터 일관성) | ZRANK/ZCARD가 Lua 내에서 O(log N) |
+| 네트워크 왕복 6→1 (지연 감소) | 5,000개 Lua 직렬 실행으로 submit p95 증가 |
+| 원자적 실행 (데이터 일관성) | Redis 싱글 스레드 병목 노출 |
 
-**다음 개선 후보:** Lua Script에서 ZRANK/ZCARD 제거 → 대기 순번을 INCR 카운터 근사치로 반환 → submit 즉시 응답 가능.
+---
+
+## 4단계: INCR 카운터 근사 순번 (ZRANK/ZCARD 제거)
+
+Lua Script에서 O(log N)인 ZRANK/ZCARD를 제거하고, O(1)인 INCR 카운터로 근사 순번을 계산.
+
+```lua
+-- Before: ZRANK O(log N) + ZCARD O(1)
+redis.call('HSET', KEYS[1], 'studentId', ARGV[1], 'courseId', ARGV[2])
+redis.call('EXPIRE', KEYS[1], 1800)
+redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+local rank = redis.call('ZRANK', KEYS[2], ARGV[4])   -- O(log N) ← 제거
+local total = redis.call('ZCARD', KEYS[2])            -- O(1)    ← 제거
+return {rank, total}
+
+-- After: INCR O(1) + 근사 순번
+local seq = redis.call('INCR', KEYS[3])               -- O(1) 접수 번호
+redis.call('HSET', KEYS[1], 'studentId', ARGV[1], 'courseId', ARGV[2], 'seq', seq)
+redis.call('EXPIRE', KEYS[1], 1800)
+redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4])
+return seq
+```
+
+**근사 순번 계산:**
+- enqueue 시: `INCR enrollment:queue:seq` → 접수 번호 발급
+- dequeue 시: `INCR enrollment:queue:processed` (처리 완료 수)
+- **근사 순번 = seq - processed**
+
+**getResult() 최적화:**
+- 기존: `ZRANK` O(log N) → 변경: `ZSCORE` O(1) + 근사 순번
+
+### Lua Script vs INCR 카운터 비교 (3,000 VU)
+
+| 지표 | Lua (ZRANK/ZCARD) | INCR 근사치 | 변화 |
+|------|-------------------|-------------|------|
+| **queue_submit p95** | 832ms | **547ms** | **-34.3%** |
+| **queue_submit avg** | 85.5ms | **58.7ms** | **-31.3%** |
+| queue_wait avg | 5,895ms | 5,919ms | 거의 동일 |
+| iterations/s | 394 | 402 | +2% |
+| enroll_success | 2,018 | **2,018** | 정합성 유지 |
+| checks_failed | ~0.19% | **~0.04%** | 개선 |
+
+---
+
+## 전체 개선 효과 요약 (4단계)
+
+### 각 개선이 해결한 것
+
+| 개선 | 효과 | 핵심 원리 |
+|------|------|----------|
+| **병렬 처리** (20스레드) | queue_wait **-57%**, 처리량 **2배** | DB 커넥션 풀 실제 활용 |
+| **Tomcat 튜닝** (5000스레드) | submit p95 **-95%** | Redis-only 엔드포인트에 쓰레드 확대 순수 이점 |
+| **Lua Script** (1회 왕복) | 네트워크 왕복 6→1, 원자적 실행 | enqueue 지연 감소 |
+| **INCR 근사 순번** | submit p95 **-34%** | ZRANK O(log N) → INCR O(1) |
 
 ---
 
@@ -152,4 +192,4 @@ return {rank, total}
 | 3,000 | 2,018 정확 | 0.00~3.23% | **안정** |
 | 5,000 | 2,018 정확 | 0.75~8.69% (환경 한계) | **앱 안정, 환경 한계** |
 
-**결론:** Phase 3 대기열 시스템은 3단계 개선(병렬 처리 + Tomcat 튜닝 + Lua Script)을 거쳐 **3,000 VU까지 안정 동작**하며, 5,000 VU에서도 정합성은 완벽하나 단일 머신 테스트 환경의 TCP 한계로 일부 연결 실패가 발생한다.
+**결론:** Phase 3 대기열 시스템은 4단계 개선(병렬 처리 + Tomcat 튜닝 + Lua Script + INCR 근사 순번)을 거쳐 **3,000 VU까지 안정 동작**하며, 5,000 VU에서도 정합성은 완벽하나 단일 머신 테스트 환경 한계로 일부 에러가 발생한다.
