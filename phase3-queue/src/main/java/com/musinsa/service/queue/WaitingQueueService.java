@@ -2,7 +2,7 @@ package com.musinsa.service.queue;
 
 import com.musinsa.api.queue.dtos.QueueDtos;
 import com.musinsa.service.enrollment.EnrollmentService;
-import lombok.RequiredArgsConstructor;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -11,12 +11,17 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 @Profile("redis")
 public class WaitingQueueService {
 
@@ -24,10 +29,31 @@ public class WaitingQueueService {
     private static final String REQUEST_PREFIX = "enrollment:request:";
     private static final String RESULT_PREFIX = "enrollment:result:";
     private static final int BATCH_SIZE = 50;
+    private static final int WORKER_THREADS = 20;
     private static final Duration RESULT_TTL = Duration.ofMinutes(10);
 
     private final StringRedisTemplate redisTemplate;
     private final EnrollmentService enrollmentService;
+    private final ExecutorService workerPool;
+
+    public WaitingQueueService(StringRedisTemplate redisTemplate, EnrollmentService enrollmentService) {
+        this.redisTemplate = redisTemplate;
+        this.enrollmentService = enrollmentService;
+        this.workerPool = Executors.newFixedThreadPool(WORKER_THREADS);
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        workerPool.shutdown();
+        try {
+            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+                workerPool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            workerPool.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     public QueueDtos.EnrollResponse enqueue(Long studentId, Long courseId) {
         String token = UUID.randomUUID().toString();
@@ -72,11 +98,21 @@ public class WaitingQueueService {
 
         if (items == null || items.isEmpty()) return;
 
+        List<Future<?>> futures = new ArrayList<>(items.size());
         for (ZSetOperations.TypedTuple<String> item : items) {
             String token = item.getValue();
             if (token == null) continue;
 
-            processEnrollment(token);
+            futures.add(workerPool.submit(() -> processEnrollment(token)));
+        }
+
+        // 배치 내 모든 작업 완료 대기 (다음 배치와 순서 보장)
+        for (Future<?> future : futures) {
+            try {
+                future.get(30, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                log.warn("배치 처리 중 예외 발생", e);
+            }
         }
     }
 

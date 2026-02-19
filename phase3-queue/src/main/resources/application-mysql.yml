@@ -32,7 +32,7 @@ spring:
 server:
   tomcat:
     threads:
-      max: 1000
-      min-spare: 200
+      max: 5000
+      min-spare: 500
     max-connections: 10000
-    accept-count: 3000
+    accept-count: 5000

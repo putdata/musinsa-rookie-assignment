@@ -9,15 +9,18 @@ const queueWaitDuration = new Trend('queue_wait_duration');
 const enrollSuccess = new Counter('enroll_success');
 const enrollFailed = new Counter('enroll_failed');
 
+// 환경변수로 VU 수 지정: k6 run --env VUS=2000 queue-enrollment-rush.js
+const VUS = parseInt(__ENV.VUS || '1000');
+
 export const options = {
   scenarios: {
     enrollment_open: {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '2s', target: 1000 },   // 수강신청 오픈! 2초만에 1000명 동시 접속
-        { duration: '2m', target: 1000 },   // 2분간 수강신청 진행
-        { duration: '10s', target: 0 },     // 종료
+        { duration: '1s', target: VUS },   // 수강신청 오픈! 1초만에 instant spike
+        { duration: '1m', target: VUS },   // 1분간 수강신청 진행
+        { duration: '5s', target: 0 },     // 종료
       ],
     },
   },

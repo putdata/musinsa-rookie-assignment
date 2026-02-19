@@ -1,8 +1,10 @@
 # k6 Instant Spike 전체 Phase 비교표
 
 **측정 일시:** 2026-02-19
-**k6 시나리오:** enrollment-rush (10s 워밍업 → 1s 500VU 스파이크 → 1m 지속 → 10s 쿨다운, 총 ~1m21s)
 **실행 방법:** java -jar (Gradle bootRun이 아닌 직접 JAR 실행)
+**k6 시나리오:**
+- Phase 0~2: enrollment-rush (1s 500VU 스파이크 → 1m 지속 → 10s 쿨다운, 총 ~1m21s)
+- Phase 3: queue-enrollment-rush (1s 1000VU 스파이크 → 1m 지속 → 5s 쿨다운, 총 ~1m6s)
 
 ## 전체 비교
 
@@ -87,4 +89,31 @@ Phase 1 Step 2 (최적) avg 24.2ms  ──┤
 Phase 1 Step 3~4      avg 25~27ms ──┘
                                      │ Redis: -74%
 Phase 2 (Redis)       avg  6.2ms  ──
+                                     │ 대기열: 패러다임 전환
+Phase 3 (대기열)      p95  2.49ms ── HTTP 에러 0%, 동시접속 2배
 ```
+
+## Phase 3 (대기열) 결과
+
+> Phase 3은 별도 시나리오(queue-enrollment-rush, 1000 VU)이므로 Phase 0~2와 직접 수치 비교는 제한적.
+
+| 지표 | Phase 2 (Redis) | Phase 3 (대기열) | 비고 |
+|------|-----------------|-----------------|------|
+| p95 | 10.5ms | **2.49ms** | HTTP 응답 기준 |
+| avg | 6.2ms | **5.01ms** | |
+| med | 3.0ms | **0.71ms** | |
+| enroll_success | 2,018 | 2,018 | 동일 |
+| 총 iterations | 307,215 | **12,452** | 재시도 없는 대기열 방식 |
+| http_req_failed | ~99.3% | **0.00%** | 패러다임 전환 |
+| max VUs | 500 | **1,000** | 2배 |
+| queue_wait avg | - | 4,196ms | 대기열 처리 대기 |
+| queue_wait p95 | - | 9,004ms | |
+
+### Phase 0 → Phase 3 전체 개선
+
+| 지표 | Phase 0 | Phase 3 | 개선율 |
+|------|---------|---------|--------|
+| p95 | 128ms | 2.49ms | **-98.1%** |
+| 총 수강신청 시도 | 192,698 | 12,452 | **-93.5%** |
+| 불필요한 실패 요청 | 190,680 | 10,434 | **-94.5%** |
+| max VUs | 500 | 1,000 | **2배** |
