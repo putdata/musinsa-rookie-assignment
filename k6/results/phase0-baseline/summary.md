@@ -1,49 +1,44 @@
-# Phase 0 Baseline 성능 측정 결과
+# Phase 0 Baseline 성능 측정 결과 (Instant Spike)
 
 **측정 일시:** 2026-02-19
-**환경:** Java 25, Spring Boot 3.5.10, MySQL 8.0 (Docker), Gradle 9.1.0
-**서버 설정:** HikariCP max-pool-size=10, min-idle=5
+**k6 시나리오:** enrollment-rush (10s 워밍업 → 1s 500VU 스파이크 → 1m 지속 → 10s 쿨다운)
+**서버 설정:** phase0-baseline, HikariCP pool=10, OSIV ON, Tomcat threads=200(기본), 인덱스 없음
 
----
-
-## Load Test (50→100 VU, 5분)
+## Enrollment Rush 결과 (전체)
 
 | 지표 | 값 |
 |------|-----|
-| iterations/s | 127.8 |
-| http_req_duration p90 | 10.75ms |
-| http_req_duration p95 | 11.78ms |
-| http_req_duration p99 | 15.41ms |
-| http_req_duration avg | 7.53ms |
-| http_req_failed rate | 43.18% (4xx 비즈니스 에러, 5xx 없음) |
-| checks passed | 100% (no server error) |
-| 총 iterations | 35,286 |
-| max VUs | 100 |
-
----
-
-## Enrollment Rush (100→500 VU, 4분 10초)
-
-| 지표 | 값 |
-|------|-----|
-| iterations/s | 1,310 |
-| http_req_duration p90 | 198.53ms |
-| http_req_duration p95 | 259.01ms |
-| http_req_duration p99 | 366.29ms |
-| http_req_duration avg | 79.32ms |
-| enroll_success | 2,018건 (8.8/s) |
-| enroll_failed | 296,778건 |
-| enroll_capacity_exceeded | 290,040건 |
-| http_req_failed rate | 99.32% (대부분 정원 초과 409) |
-| checks passed | 100% (no server error, 5xx 0건) |
-| 총 iterations | 298,796 |
+| iterations/s | 1,910.7 |
+| http_req_duration p95 | 144.5ms |
+| http_req_duration avg | 111.6ms |
+| http_req_duration med | 116.5ms |
+| http_req_duration max | 502.9ms |
+| enroll_success | 2,018 (24.9/s) |
+| enroll_failed | 152,867 |
+| enroll_capacity_exceeded | 149,398 |
+| checks passed | 100% (154,885/154,885) |
+| 총 iterations | 154,885 |
 | max VUs | 500 |
 
----
+## Burst 구간 (0~25초, 정원 경쟁)
+
+| 지표 | 값 |
+|------|-----|
+| enroll_duration_burst p95 | 204.0ms |
+| enroll_duration_burst avg | 124.1ms |
+| enroll_success_burst | 2,018 |
+
+## Sustained 구간 (25초~, 정원 소진 후)
+
+| 지표 | 값 |
+|------|-----|
+| enroll_duration_sustained p95 | 137.0ms |
+| enroll_duration_sustained avg | 108.3ms |
+| enroll_success_sustained | 0 |
 
 ## 분석
 
-- **서버 안정성**: 500 VU 동시 부하에서도 5xx 에러 0건. 비관적 락 기반 동시성 제어가 안정적으로 동작.
-- **응답 시간**: Load test 기준 p95 11.78ms로 매우 양호. Rush 시나리오에서도 p95 259ms로 500ms 이내.
-- **정원 초과 제어**: 인기 강좌(1~50번) 대상 50만 건 이상 요청에서 정원 초과가 정확히 감지됨.
-- **개선 포인트**: HikariCP pool-size가 10으로 작아 대량 동시 요청 시 커넥션 대기 발생 가능. Phase 1에서 튜닝 예정.
+- **서버 안정성**: 500 VU instant spike에서도 5xx 에러 0건. checks 100% 통과.
+- **정원 소진**: burst 구간에서 2,018건 성공 후 sustained 구간에서는 성공 0건 → 정원이 burst 구간 내에 모두 소진됨.
+- **burst vs sustained 응답시간**: burst p95(204ms) > sustained p95(137ms) → 정원 경쟁 구간에서 락 대기로 인한 지연 확인.
+- **처리량**: 1,910.7 req/s로 기존 점진적 ramp-up(1,310 req/s) 대비 높지만, 시나리오 구조 차이(총 시간 단축)에 기인.
