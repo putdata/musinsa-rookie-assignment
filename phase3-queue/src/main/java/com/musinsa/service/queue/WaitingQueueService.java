@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
@@ -31,6 +32,21 @@ public class WaitingQueueService {
     private static final int BATCH_SIZE = 50;
     private static final int WORKER_THREADS = 20;
     private static final Duration RESULT_TTL = Duration.ofMinutes(10);
+
+    private static final DefaultRedisScript<List> ENQUEUE_SCRIPT;
+
+    static {
+        ENQUEUE_SCRIPT = new DefaultRedisScript<>();
+        ENQUEUE_SCRIPT.setScriptText(
+                "redis.call('HSET', KEYS[1], 'studentId', ARGV[1], 'courseId', ARGV[2]) " +
+                "redis.call('EXPIRE', KEYS[1], 1800) " +
+                "redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4]) " +
+                "local rank = redis.call('ZRANK', KEYS[2], ARGV[4]) " +
+                "local total = redis.call('ZCARD', KEYS[2]) " +
+                "return {rank, total}"
+        );
+        ENQUEUE_SCRIPT.setResultType(List.class);
+    }
 
     private final StringRedisTemplate redisTemplate;
     private final EnrollmentService enrollmentService;
@@ -59,19 +75,25 @@ public class WaitingQueueService {
         String token = UUID.randomUUID().toString();
         double score = System.currentTimeMillis();
 
-        // 요청 정보 저장
-        redisTemplate.opsForHash().put(REQUEST_PREFIX + token, "studentId", studentId.toString());
-        redisTemplate.opsForHash().put(REQUEST_PREFIX + token, "courseId", courseId.toString());
-        redisTemplate.expire(REQUEST_PREFIX + token, Duration.ofMinutes(30));
+        // Lua Script: 6개 Redis 명령을 1회 왕복으로 처리
+        List<String> keys = List.of(REQUEST_PREFIX + token, QUEUE_KEY);
+        List<String> args = List.of(
+                studentId.toString(),
+                courseId.toString(),
+                String.valueOf(score),
+                token
+        );
 
-        // 대기열에 추가
-        redisTemplate.opsForZSet().add(QUEUE_KEY, token, score);
+        List<?> result = redisTemplate.execute(ENQUEUE_SCRIPT, keys, args.toArray(new String[0]));
 
-        Long rank = redisTemplate.opsForZSet().rank(QUEUE_KEY, token);
-        Long total = redisTemplate.opsForZSet().size(QUEUE_KEY);
-        long position = (rank != null) ? rank + 1 : -1;
+        long position = -1;
+        long total = 0;
+        if (result != null && result.size() == 2) {
+            position = ((Long) result.get(0)) + 1;
+            total = (Long) result.get(1);
+        }
 
-        return new QueueDtos.EnrollResponse(token, position, total != null ? total : 0);
+        return new QueueDtos.EnrollResponse(token, position, total);
     }
 
     public QueueDtos.ResultResponse getResult(String token) {
