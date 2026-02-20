@@ -34,6 +34,18 @@ function pollInterval(position) {
   return 5;                           // 한참 뒤: 5초
 }
 
+export function setup() {
+  for (let i = 0; i < 30; i++) {
+    const res = http.get(`${BASE_URL}/health`);
+    if (res.status === 200) {
+      console.log(`서버 준비 완료 (${i + 1}초)`);
+      return;
+    }
+    sleep(1);
+  }
+  throw new Error('서버가 30초 내에 응답하지 않음');
+}
+
 export default function () {
   // 1 VU = 1 학생 (고정)
   const studentId = (__VU % STUDENT_COUNT) + 1;

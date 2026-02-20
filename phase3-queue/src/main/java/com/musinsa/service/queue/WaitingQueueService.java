@@ -29,24 +29,44 @@ public class WaitingQueueService {
     private static final String QUEUE_KEY = "enrollment:queue";
     private static final String REQUEST_PREFIX = "enrollment:request:";
     private static final String RESULT_PREFIX = "enrollment:result:";
-    private static final String SEQ_KEY = "enrollment:queue:seq";
-    private static final String PROCESSED_KEY = "enrollment:queue:processed";
     private static final int BATCH_SIZE = 50;
     private static final int WORKER_THREADS = 20;
     private static final Duration RESULT_TTL = Duration.ofMinutes(10);
 
-    private static final DefaultRedisScript<Long> ENQUEUE_SCRIPT;
+    @SuppressWarnings("rawtypes")
+    private static final DefaultRedisScript<List> ENQUEUE_SCRIPT;
+    private static final DefaultRedisScript<String> GET_RESULT_SCRIPT;
 
     static {
         ENQUEUE_SCRIPT = new DefaultRedisScript<>();
         ENQUEUE_SCRIPT.setScriptText(
-                "local seq = redis.call('INCR', KEYS[3]) " +
-                "redis.call('HSET', KEYS[1], 'studentId', ARGV[1], 'courseId', ARGV[2], 'seq', seq) " +
+                "redis.call('HSET', KEYS[1], 'studentId', ARGV[1], 'courseId', ARGV[2]) " +
                 "redis.call('EXPIRE', KEYS[1], 1800) " +
                 "redis.call('ZADD', KEYS[2], ARGV[3], ARGV[4]) " +
-                "return seq"
+                "local rank = redis.call('ZRANK', KEYS[2], ARGV[4]) " +
+                "local total = redis.call('ZCARD', KEYS[2]) " +
+                "return {rank + 1, total}"
         );
-        ENQUEUE_SCRIPT.setResultType(Long.class);
+        ENQUEUE_SCRIPT.setResultType(List.class);
+
+        GET_RESULT_SCRIPT = new DefaultRedisScript<>();
+        GET_RESULT_SCRIPT.setScriptText(
+                "local status = redis.call('HGET', KEYS[1], 'status') " +
+                "if status then " +
+                "local message = redis.call('HGET', KEYS[1], 'message') or '' " +
+                "return '1:' .. status .. ':' .. message " +
+                "end " +
+                "local rank = redis.call('ZRANK', KEYS[2], ARGV[1]) " +
+                "if rank then " +
+                "local total = redis.call('ZCARD', KEYS[2]) " +
+                "return '2:' .. tostring(rank + 1) .. ':' .. tostring(total) " +
+                "end " +
+                "if redis.call('EXISTS', KEYS[3]) == 1 then " +
+                "return '3' " +
+                "end " +
+                "return '4'"
+        );
+        GET_RESULT_SCRIPT.setResultType(String.class);
     }
 
     private final StringRedisTemplate redisTemplate;
@@ -72,11 +92,12 @@ public class WaitingQueueService {
         }
     }
 
+    @SuppressWarnings("unchecked")
     public QueueDtos.EnrollResponse enqueue(Long studentId, Long courseId) {
         String token = UUID.randomUUID().toString();
         double score = System.currentTimeMillis();
 
-        List<String> keys = List.of(REQUEST_PREFIX + token, QUEUE_KEY, SEQ_KEY);
+        List<String> keys = List.of(REQUEST_PREFIX + token, QUEUE_KEY);
         List<String> args = List.of(
                 studentId.toString(),
                 courseId.toString(),
@@ -84,44 +105,34 @@ public class WaitingQueueService {
                 token
         );
 
-        Long seq = redisTemplate.execute(ENQUEUE_SCRIPT, keys, args.toArray(new String[0]));
+        List<Long> result = (List<Long>) redisTemplate.execute(ENQUEUE_SCRIPT, keys, args.toArray(new String[0]));
 
         long position = 1;
-        if (seq != null) {
-            String processedStr = redisTemplate.opsForValue().get(PROCESSED_KEY);
-            long processed = processedStr != null ? Long.parseLong(processedStr) : 0;
-            position = Math.max(seq - processed, 1);
+        long totalWaiting = 1;
+        if (result != null && result.size() >= 2) {
+            position = result.get(0);
+            totalWaiting = result.get(1);
         }
 
-        return new QueueDtos.EnrollResponse(token, position, position);
+        return new QueueDtos.EnrollResponse(token, position, totalWaiting);
     }
 
     public QueueDtos.ResultResponse getResult(String token) {
-        // 1. 결과가 있으면 반환
-        String status = (String) redisTemplate.opsForHash().get(RESULT_PREFIX + token, "status");
-        if (status != null) {
-            String message = (String) redisTemplate.opsForHash().get(RESULT_PREFIX + token, "message");
-            return new QueueDtos.ResultResponse(token, status, message);
+        List<String> keys = List.of(RESULT_PREFIX + token, QUEUE_KEY, REQUEST_PREFIX + token);
+
+        String result = redisTemplate.execute(GET_RESULT_SCRIPT, keys, token);
+        if (result == null) {
+            return new QueueDtos.ResultResponse(token, "NOT_FOUND", "요청을 찾을 수 없습니다");
         }
 
-        // 2. request:{token} 존재 → 대기 중 또는 처리 중 (popMin 후에도 request 해시는 남아있음)
-        String seqStr = (String) redisTemplate.opsForHash().get(REQUEST_PREFIX + token, "seq");
-        if (seqStr != null) {
-            String processedStr = redisTemplate.opsForValue().get(PROCESSED_KEY);
-            long seq = Long.parseLong(seqStr);
-            long processed = processedStr != null ? Long.parseLong(processedStr) : 0;
-            long approxPosition = Math.max(seq - processed, 1);
-            return new QueueDtos.ResultResponse(token, "WAITING", "대기 순번: " + approxPosition);
-        }
-
-        // 3. request 만료 시 ZSET fallback (request TTL 30분 < 큐 체류 시간인 경우)
-        Double score = redisTemplate.opsForZSet().score(QUEUE_KEY, token);
-        if (score != null) {
-            return new QueueDtos.ResultResponse(token, "WAITING", "대기 중입니다");
-        }
-
-        // 4. 어디에도 없으면 NOT_FOUND
-        return new QueueDtos.ResultResponse(token, "NOT_FOUND", "요청을 찾을 수 없습니다");
+        String[] parts = result.split(":", 3);
+        return switch (parts[0]) {
+            case "1" -> new QueueDtos.ResultResponse(token, parts[1], parts.length > 2 ? parts[2] : "");
+            case "2" -> new QueueDtos.ResultResponse(token, "WAITING",
+                    "대기 순번: " + parts[1] + " / 전체 " + parts[2] + "명");
+            case "3" -> new QueueDtos.ResultResponse(token, "WAITING", "처리 중입니다");
+            default -> new QueueDtos.ResultResponse(token, "NOT_FOUND", "요청을 찾을 수 없습니다");
+        };
     }
 
     @Scheduled(fixedDelay = 100)
@@ -131,9 +142,6 @@ public class WaitingQueueService {
 
         if (items == null || items.isEmpty()) return;
 
-        // 처리 카운터 증가 (근사 순번 계산용)
-        redisTemplate.opsForValue().increment(PROCESSED_KEY, items.size());
-
         List<Future<?>> futures = new ArrayList<>(items.size());
         for (ZSetOperations.TypedTuple<String> item : items) {
             String token = item.getValue();
@@ -142,7 +150,6 @@ public class WaitingQueueService {
             futures.add(workerPool.submit(() -> processEnrollment(token)));
         }
 
-        // 배치 내 모든 작업 완료 대기 (다음 배치와 순서 보장)
         for (Future<?> future : futures) {
             try {
                 future.get(30, TimeUnit.SECONDS);
