@@ -22,21 +22,17 @@ public class CourseCounterService {
     private static final String ENROLLED_KEY_PREFIX = "course:enrolled:";
     private static final String CAPACITY_KEY_PREFIX = "course:capacity:";
 
-    private static final DefaultRedisScript<Long> TRY_ENROLL_SCRIPT;
+    private static final DefaultRedisScript<Long> IS_FULL_SCRIPT;
 
     static {
-        TRY_ENROLL_SCRIPT = new DefaultRedisScript<>();
-        TRY_ENROLL_SCRIPT.setScriptText(
-                "local enrolled = redis.call('INCR', KEYS[1]) " +
-                "local capacity = tonumber(redis.call('GET', KEYS[2])) " +
-                "if capacity == nil then return enrolled end " +
-                "if enrolled > capacity then " +
-                "  redis.call('DECR', KEYS[1]) " +
-                "  return -1 " +
-                "end " +
-                "return enrolled"
+        IS_FULL_SCRIPT = new DefaultRedisScript<>();
+        IS_FULL_SCRIPT.setScriptText(
+                "local enrolled = tonumber(redis.call('GET', KEYS[1]) or '0') " +
+                "local capacity = tonumber(redis.call('GET', KEYS[2]) or '0') " +
+                "if capacity > 0 and enrolled >= capacity then return 1 end " +
+                "return 0"
         );
-        TRY_ENROLL_SCRIPT.setResultType(Long.class);
+        IS_FULL_SCRIPT.setResultType(Long.class);
     }
 
     public void flushAll() {
@@ -49,16 +45,19 @@ public class CourseCounterService {
     }
 
     /**
-     * 원자적으로 수강 인원을 증가시키고 정원을 검사한다.
-     * @return 증가된 수강 인원. 정원 초과 시 -1 반환 (DECR 자동 롤백됨).
+     * 정원 초과 여부를 읽기 전용으로 확인한다 (카운터 변경 없음).
      */
-    public long tryEnroll(Long courseId) {
+    public boolean isFull(Long courseId) {
         List<String> keys = List.of(ENROLLED_KEY_PREFIX + courseId, CAPACITY_KEY_PREFIX + courseId);
-        Long result = redisTemplate.execute(TRY_ENROLL_SCRIPT, keys);
-        return result != null ? result : -1;
+        Long result = redisTemplate.execute(IS_FULL_SCRIPT, keys);
+        return result != null && result == 1;
     }
 
-    public void cancelEnroll(Long courseId) {
+    public void incrementEnrolled(Long courseId) {
+        redisTemplate.opsForValue().increment(ENROLLED_KEY_PREFIX + courseId);
+    }
+
+    public void decrementEnrolled(Long courseId) {
         redisTemplate.opsForValue().decrement(ENROLLED_KEY_PREFIX + courseId);
     }
 

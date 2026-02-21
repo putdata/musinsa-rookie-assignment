@@ -43,26 +43,23 @@ public class EnrollmentService {
     public Enrollment enroll(Long studentId, Long courseId) {
         CourseCounterService counterService = counterProvider.getIfAvailable();
 
-        // 1. Redis fast rejection: 정원 초과면 DB까지 안 감
-        if (counterService != null) {
-            long result = counterService.tryEnroll(courseId);
-            if (result == -1) {
-                throw new BusinessException(ErrorCode.CAPACITY_EXCEEDED);
-            }
+        // 1. Redis fast rejection (read-only): 정원 초과면 DB까지 안 감
+        if (counterService != null && counterService.isFull(courseId)) {
+            throw new BusinessException(ErrorCode.CAPACITY_EXCEEDED);
         }
 
-        try {
-            return doEnroll(studentId, courseId, counterService != null);
-        } catch (Exception e) {
-            // DB 검증 실패 시 Redis 카운터 보상
-            if (counterService != null) {
-                counterService.cancelEnroll(courseId);
-            }
-            throw e;
+        // 2. DB 비관적 락으로 실제 수강신청
+        Enrollment enrollment = doEnroll(studentId, courseId);
+
+        // 3. 성공 후에만 카운터 증가 (보상 로직 불필요)
+        if (counterService != null) {
+            counterService.incrementEnrolled(courseId);
         }
+
+        return enrollment;
     }
 
-    private Enrollment doEnroll(Long studentId, Long courseId, boolean redisManaged) {
+    private Enrollment doEnroll(Long studentId, Long courseId) {
         // 1. Student 비관적 락 획득
         Student student = studentRepository.findByIdWithLock(studentId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.STUDENT_NOT_FOUND));
@@ -128,7 +125,7 @@ public class EnrollmentService {
         // Redis 카운터 감소
         CourseCounterService counterService = counterProvider.getIfAvailable();
         if (counterService != null) {
-            counterService.cancelEnroll(course.getId());
+            counterService.decrementEnrolled(course.getId());
         }
     }
 
