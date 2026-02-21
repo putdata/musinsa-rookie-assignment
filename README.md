@@ -27,8 +27,7 @@
 ```
 ├── phase0-baseline/        # Phase 0: Spring Boot + MySQL + 비관적 락
 ├── phase1-optimization/    # Phase 1: HikariCP + OSIV OFF + 인덱스
-├── phase2-redis/           # Phase 2: Redis 원자 연산 + 캐싱
-├── phase3-queue/           # Phase 3: Redis Sorted Set 대기열 (개발용)
+├── phase2-redis/           # Phase 2: Redis read-only 체크 + 캐싱
 ├── phase3-step1/           # Phase 3 Step 1: 순차 처리 (1 스레드)
 ├── phase3-step2/           # Phase 3 Step 2: 병렬 처리 (20 스레드)
 ├── phase3-step3/           # Phase 3 Step 3: Lua Script 원자 연산
@@ -102,8 +101,8 @@ java -jar phase0-baseline/build/libs/phase0-baseline-0.0.1-SNAPSHOT.jar \
 java -jar phase2-redis/build/libs/phase2-redis-0.0.1-SNAPSHOT.jar \
   --spring.profiles.active=mysql,redis
 
-# Phase 3: 대기열 시스템
-java -jar phase3-queue/build/libs/phase3-queue-0.0.1-SNAPSHOT.jar \
+# Phase 3: 대기열 시스템 (Step 3 기준)
+java -jar phase3-step3/build/libs/phase3-step3-0.0.1-SNAPSHOT.jar \
   --spring.profiles.active=mysql,redis
 ```
 
@@ -140,7 +139,9 @@ k6 run k6/scenarios/mixed-workload.js
 > **테스트 환경:** Windows에서 Spring Boot 서버(`java -jar`) + k6, Docker로 MySQL/Redis를 동일 머신에서 실행.
 > 독립된 서버 환경이 아니므로 절대값보다 **Phase 간 상대적 추이**에 의미가 있습니다.
 >
-> **공통 조건:** 인기 강좌 50개 (정원 합계 2,018명), 학생 10,000명, 1초 instant spike, `java -jar` 실행
+> **Phase 0~2 조건:** 인기 강좌 50개 (정원 합계 2,018명), 학생 10,000명, 500 VU, 1초 instant spike
+> **Phase 3 조건:** 인기 강좌 50개 (정원 합계 ~3,957명), 학생 10,000명, 3000 VU, Burst + Sustained 패턴
+> **공통:** `java -jar` 실행
 
 ### Phase 0 — Baseline (500 VU)
 
