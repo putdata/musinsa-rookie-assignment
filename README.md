@@ -297,7 +297,8 @@ AI와의 협업 과정을 기록한 프롬프트 이력입니다.
 | [002](docs/decisions/002-tech-stack.md) | 기술 스택 선택 | Accepted |
 | [003](docs/decisions/003-enrollment-cancel-idempotency.md) | 수강취소 동시성 및 DELETE 멱등성 | Accepted |
 | [003-osiv](docs/decisions/003-osiv-disable.md) | OSIV 비활성화 | Accepted |
-| [004](docs/decisions/004-redis-atomic-enrollment-counter.md) | Redis 원자 연산 기반 수강 인원 관리 | Accepted |
+| [004](docs/decisions/004-redis-atomic-enrollment-counter.md) | Redis 원자 연산 기반 수강 인원 관리 | Superseded by 008 |
 | [005](docs/decisions/005-phase1-optimization-analysis.md) | Phase 1 최적화 개별 효과 검증 및 인덱스/배치 불필요 결정 | Accepted |
 | [006](docs/decisions/006-phase2-redis-cache-memory-analysis.md) | Phase 2 강좌 캐시 Redis 메모리 적재 가능성 분석 | Accepted |
 | [007](docs/decisions/007-getresult-race-condition-fix.md) | getResult() NOT_FOUND 레이스 컨디션 제거 | Accepted |
+| [008](docs/decisions/008-redis-read-only-check-then-increment.md) | Redis read-only 체크 후 DB 성공 시 카운터 증가 | Accepted |

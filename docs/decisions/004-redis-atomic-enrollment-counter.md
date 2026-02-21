@@ -1,7 +1,7 @@
 # ADR-004: Redis 원자 연산 기반 수강 인원 관리
 
 ## 상태
-채택됨
+대체됨 (Superseded by [ADR-008](008-redis-read-only-check-then-increment.md))
 
 ## 맥락
 
